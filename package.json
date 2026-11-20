@@ -6,8 +6,9 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "wrap": "npm run build && node -e \"fs.cpSync('manifest.json', 'dist/manifest.json')\" && tar -a -c -f extension.zip -C dist .",
-    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('extension.zip', { force: true })\""
+    "wrap": "npm run clean && npm run build && powershell -NoProfile -Command \"Compress-Archive -Path @('manifest.json', 'dist') -DestinationPath 'moreinfo.zip' -Force\"",
+    "wrap:firefox": "npm run clean && npm run build && powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path temp_ff | Out-Null; Copy-Item -Path dist -Destination temp_ff\\dist -Recurse; Copy-Item -Path manifest_firefox.json -Destination temp_ff\\manifest.json; Compress-Archive -Path temp_ff\\* -DestinationPath moreinfo-firefox.zip -Force; Remove-Item -Path temp_ff -Recurse -Force\"",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('moreinfo.zip', { force: true })\""
   },
   "keywords": [],
   "author": "",
