@@ -1,11 +1,13 @@
 {
   "name": "solvedac-extension",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "wrap": "npm run build && node -e \"fs.cpSync('manifest.json', 'dist/manifest.json')\" && tar -a -c -f extension.zip -C dist .",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('extension.zip', { force: true })\""
   },
   "keywords": [],
   "author": "",

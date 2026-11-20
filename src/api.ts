@@ -18,7 +18,6 @@ function fail(
   return { ok: false, code, message, retryAfterSeconds };
 }
 
-// 서버 응답이 약속한 모양인지 확인한다 (as로 믿지 않고 직접 검사)
 function isLevelDeltasData(v: unknown): v is LevelDeltasData {
   if (typeof v !== "object" || v === null) return false;
   const d = v as Record<string, unknown>;
@@ -47,7 +46,6 @@ export async function fetchLevelDeltas(handle: string): Promise<Result<LevelDelt
     return fail("NETWORK_ERROR", "Failed to reach server.");
   }
 
-  // Cloudflare 속도 제한은 JSON이 아닌 429를 줄 수 있어서 상태 코드부터 본다
   if (res.status === 429) {
     const retry = Number(res.headers.get("Retry-After"));
     return fail("RATE_LIMITED", "Too many requests.", retry > 0 ? retry : undefined);
