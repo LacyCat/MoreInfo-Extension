@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "MoreInfo - 더 많은 BOJ 정보",
+  "version": "0.1.0",
+  "description": "백준 문제 페이지에 solved.ac 예상 레이팅 변화를 표시합니다.",
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["https://moreinfo.lacycat.org/*"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://acmicpc.net/problemset*",
+        "https://www.acmicpc.net/problemset*",
+        "https://acmicpc.net/problem/*",
+        "https://www.acmicpc.net/problem/*"
+      ],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
