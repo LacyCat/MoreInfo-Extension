@@ -4,8 +4,8 @@ MoreInfo는 솔브닥(solved.ac)의 최신 v4 API를 사용해 더 많은 정보
 ## 설치 및 사용
 1. 릴리즈에서 브라우저에 맞는 ZIP을 다운받습니다. 
 2. ZIP을 압축 해제하고, 각 브라우저에 주소를 쳐서 익스텐션 창에 들어갑니다. 
-- (크롬의 경우: chrome://extensions) 
-- (파이어 폭스의 경우: about:debugging) 
+    - (크롬의 경우: chrome://extensions) 
+    - (파이어 폭스의 경우: about:debugging) 
 3. 크롬은 오른쪽 위의 개발자 모드 스위치를 ON으로 전환하고, 압축해제된 확장 프로그램 로드를 눌러 폴더를 엽니다.
 4. 파이어 폭스는 about:debugging으로 가서 좌측 메뉴 -> 이 파이어폭스 선택 후 임시 부가 기능 로드를 눌러 manifest.json을 선택합니다.
 

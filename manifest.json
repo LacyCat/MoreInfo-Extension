@@ -15,7 +15,8 @@
         "https://acmicpc.net/problemset*",
         "https://www.acmicpc.net/problemset*",
         "https://acmicpc.net/problem/*",
-        "https://www.acmicpc.net/problem/*"
+        "https://www.acmicpc.net/problem/*",
+        "https://acmicpc.net/workbook/view/*"
       ],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
