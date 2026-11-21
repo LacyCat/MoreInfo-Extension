@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MoreInfo - 더 많은 BOJ 정보",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "백준 문제 페이지에 solved.ac 예상 레이팅 변화를 표시합니다.",
   "background": {
     "scripts": ["dist/background.js"],
