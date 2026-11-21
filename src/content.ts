@@ -29,6 +29,19 @@ type CachedTagResult =
   | { ok: true; data: CachedTagMap }
   | { ok: false; code: string; message: string };
 
+interface HealthStatus {
+  clientVersion: string;
+  minClientVersion: string | null;
+  latestClientVersion: string | null;
+  updateRequired: boolean;
+  updateAvailable: boolean;
+  message: string | null;
+  updateUrl: string | null;
+}
+type HealthResult =
+  | { ok: true; data: HealthStatus }
+  | { ok: false; code: string; message: string };
+
 (() => {
 
   const TABLE_SELECTOR = "table#problemset";
@@ -369,7 +382,7 @@ type CachedTagResult =
       width: `${ICON_SLOT_PX}px`,
       height: `${ICON_SLOT_PX}px`,
       borderRadius: "6px",
-      background: "transparent",
+      background: "#f2f4f7",
       color: "#4a5568",
     });
 
@@ -420,7 +433,8 @@ type CachedTagResult =
     detail.textContent =
       `${t.currentRating} → ${t.predictedRating}` +
       ` · 문제합 ${fmtSigned(t.delta.problemSum)}` +
-      ` · 보너스 ${fmtSigned(t.delta.solvedBonus)}`;
+      ` · 보너스 ${fmtSigned(t.delta.solvedBonus)}` +
+      ` · 풀이 ${t.solvedCount}`;
     css(detail, { fontSize: "12px", color: "#718096" });
 
     body.append(name, detail);
@@ -590,10 +604,170 @@ type CachedTagResult =
     attachTagBox(badge, "left", { initial: null, load, emptyMessage });
   }
 
+  /* ---------------- 업데이트 안내 팝업 ---------------- */
+
+  const UPDATE_NOTICE_CLASS = "boj-moreinfo-update-notice";
+  const AVAILABLE_NOTICE_MS = 3000;
+  const DISMISS_KEY = "updateNoticeDismissed"; // 선택적 업데이트 안내를 닫은 최신 버전
+
+  function showUpdateNotice(h: HealthStatus, onClose: () => void): void {
+    if (document.querySelector(`.${UPDATE_NOTICE_CLASS}`)) return;
+
+    const box = document.createElement("div");
+    box.className = UPDATE_NOTICE_CLASS;
+    css(box, {
+      position: "fixed",
+      right: "16px",
+      bottom: "16px",
+      zIndex: "2147483647",
+      boxSizing: "border-box",
+      width: "320px",
+      maxWidth: "calc(100vw - 32px)",
+      padding: "12px 14px",
+      background: "#fff",
+      color: "#2d3748",
+      border: `1px solid ${h.updateRequired ? "#f0b4b4" : "#d9dee5"}`,
+      borderLeft: `4px solid ${h.updateRequired ? "#e03131" : "#5381a0"}`,
+      borderRadius: "8px",
+      boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+      font: "13px/1.5 sans-serif",
+      textAlign: "left",
+    });
+
+    const title = document.createElement("div");
+    title.textContent = h.updateRequired
+      ? "MoreInfo 업데이트가 필요해요"
+      : "MoreInfo 새 버전이 있어요";
+    css(title, { fontWeight: "bold", marginBottom: "4px", paddingRight: "18px" });
+
+    const body = document.createElement("div");
+    body.textContent =
+      h.message ??
+      (h.updateRequired
+        ? `서버가 변경되어 현재 버전(${h.clientVersion})은 정상적으로 동작하지 않을 수 있어요.` +
+          ` ${h.minClientVersion} 이상으로 업데이트해 주세요.`
+        : `현재 ${h.clientVersion} → 최신 ${h.latestClientVersion}`);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "×";
+    close.setAttribute("aria-label", "닫기");
+    css(close, {
+      position: "absolute",
+      top: "6px",
+      right: "8px",
+      padding: "0 4px",
+      border: "0",
+      background: "transparent",
+      color: "#718096",
+      font: "18px/1 sans-serif",
+      cursor: "pointer",
+    });
+    close.addEventListener("click", () => {
+      box.remove();
+      onClose();
+    });
+
+    box.append(title, body);
+
+    if (h.updateUrl) {
+      const link = document.createElement("a");
+      link.href = h.updateUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "업데이트 하러 가기";
+      css(link, { display: "inline-block", marginTop: "6px", color: "#1c7ed6", fontWeight: "bold" });
+      box.append(link);
+    }
+
+    box.append(close);
+    document.body.append(box);
+    if (!h.updateRequired) setTimeout(() => box.remove(), AVAILABLE_NOTICE_MS);
+  }
+
+  /* --- 디버그: 서버 없이 팝업을 테스트 (스토어 제출 전에 DEBUG_PARAMS_ENABLED를 false로) ---
+   * 백준 문제/목록 페이지 주소 뒤에 ?moreinfo_debug_update=값 을 붙이면 됨
+   *   required  : 필수 업데이트 팝업 (기본 문구)
+   *   available : 선택 업데이트 팝업 (닫은 기록과 무관하게 항상 표시, 기록도 안 남김)
+   *   server    : 서버가 message/updateUrl을 준 경우의 필수 팝업
+   *   clear     : "선택 업데이트를 닫음" 기록을 지우고 평소처럼 진행
+   */
+  const DEBUG_PARAMS_ENABLED = true;
+  const DEBUG_PARAM = "moreinfo_debug_update";
+
+  function debugHealthFromUrl(): HealthStatus | "clear" | null {
+    if (!DEBUG_PARAMS_ENABLED) return null;
+    const value = new URLSearchParams(location.search).get(DEBUG_PARAM);
+    const base: HealthStatus = {
+      clientVersion: "debug",
+      minClientVersion: "9.9.9",
+      latestClientVersion: "9.9.9",
+      updateRequired: false,
+      updateAvailable: false,
+      message: null,
+      updateUrl: null,
+    };
+    switch (value) {
+      case "required":
+        return { ...base, updateRequired: true };
+      case "available":
+        return { ...base, updateAvailable: true };
+      case "server":
+        return {
+          ...base,
+          updateRequired: true,
+          message: "[디버그] 서버가 보낸 안내 문구 예시예요.",
+          updateUrl: "https://github.com/LacyCat/MoreInfo-Extension/releases/latest",
+        };
+      case "clear":
+        return "clear";
+      default:
+        return null;
+    }
+  }
+
+  async function checkUpdateNotice(): Promise<void> {
+    const debug = debugHealthFromUrl();
+    if (debug === "clear") {
+      await chrome.storage.local.remove(DISMISS_KEY).catch(() => undefined);
+      console.debug("[BOJ Rating Preview]", "debug: dismissed-notice record cleared");
+    } else if (debug) {
+      console.debug("[BOJ Rating Preview]", "debug update notice");
+      showUpdateNotice(debug, () => undefined);
+      return;
+    }
+
+    const res = await send<HealthResult>({ type: "GET_HEALTH" });
+    if (!res || !res.ok) return; // Health를 못 받으면 조용히 넘어감
+    const h = res.data;
+    if (!h.updateRequired && !h.updateAvailable) return;
+
+    if (h.updateRequired) {
+      // 필수 업데이트는 페이지를 열 때마다 보여줌 (닫기는 이 페이지에서만)
+      showUpdateNotice(h, () => undefined);
+      return;
+    }
+
+    // 선택 업데이트는 같은 최신 버전에 대해 한 번 닫으면 다시 안 보여줌
+    const latest = h.latestClientVersion ?? "";
+    try {
+      const stored = await chrome.storage.local.get(DISMISS_KEY);
+      if (stored[DISMISS_KEY] === latest) return;
+    } catch {
+      // 저장소를 못 읽으면 그냥 보여줌
+    }
+    showUpdateNotice(h, () => {
+      void chrome.storage.local.set({ [DISMISS_KEY]: latest }).catch(() => undefined);
+    });
+  }
+
   async function main(): Promise<void> {
     const table = document.querySelector<HTMLTableElement>(TABLE_SELECTOR);
     const titleEl = document.querySelector<HTMLElement>(PROBLEM_TITLE_SELECTOR);
     if (!table && !titleEl) return; 
+
+    // 로그인 여부/서버 응답과 상관없이 확인 (서버가 바뀌어 아래 요청이 실패해도 안내가 떠야 함)
+    void checkUpdateNotice();
 
     const handle = getHandle();
     if (!handle) return;

@@ -1,8 +1,11 @@
-import { fetchLevelDeltas, fetchTagLevelDeltas, HANDLE_RE } from "./api.js";
+import { fetchHealth, fetchLevelDeltas, fetchTagLevelDeltas, HANDLE_RE } from "./api.js";
 import type {
   GetCachedTagDeltasMessage,
+  GetHealthMessage,
   GetLevelDeltasMessage,
   GetTagLevelDeltasMessage,
+  HealthData,
+  HealthStatus,
   LevelDeltasData,
   Result,
   TagCache,
@@ -120,6 +123,89 @@ async function getTagLevelDeltasCached(
   return request;
 }
 
+/* ---------------- Health / 버전 확인 ---------------- */
+
+const HEALTH_CACHE_KEY = "healthCheck";
+const HEALTH_TTL_OK_MS = 6 * 60 * 60 * 1000; // 성공 결과는 6시간 재사용
+const HEALTH_TTL_FAIL_MS = 5 * 60 * 1000; // 실패는 5분 뒤 재시도
+
+interface HealthCacheEntry {
+  savedAt: number;
+  clientVersion: string; // 확장이 업데이트되면 캐시 무효화
+  result: Result<HealthStatus>;
+}
+
+let healthInflight: Promise<Result<HealthStatus>> | null = null;
+
+/** "1.2.3" 형태만 비교. 해석 못 하면 null. */
+function parseVersion(v: string): number[] | null {
+  if (!/^\d+(\.\d+){0,3}$/.test(v)) return null;
+  return v.split(".").map(Number);
+}
+
+/** a가 b보다 낮으면 true. 어느 한쪽이라도 해석 못 하면 false(알림 안 띄움). */
+function isOlder(a: string, b: string): boolean {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa || !pb) return false;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+function toHealthStatus(data: HealthData, clientVersion: string): HealthStatus {
+  const min = data.minClientVersion ?? null;
+  const latest = data.latestClientVersion ?? null;
+  const updateRequired = min !== null && isOlder(clientVersion, min);
+  const updateAvailable = !updateRequired && latest !== null && isOlder(clientVersion, latest);
+  return {
+    clientVersion,
+    minClientVersion: min,
+    latestClientVersion: latest,
+    updateRequired,
+    updateAvailable,
+    message: data.message ?? null,
+    updateUrl: data.updateUrl ?? null,
+  };
+}
+
+async function getHealthCached(): Promise<Result<HealthStatus>> {
+  const clientVersion = chrome.runtime.getManifest().version;
+
+  try {
+    const stored = await chrome.storage.local.get(HEALTH_CACHE_KEY);
+    const entry = stored[HEALTH_CACHE_KEY] as HealthCacheEntry | undefined;
+    if (entry && entry.clientVersion === clientVersion) {
+      const ttl = entry.result.ok ? HEALTH_TTL_OK_MS : HEALTH_TTL_FAIL_MS;
+      if (Date.now() - entry.savedAt < ttl) return entry.result;
+    }
+  } catch {
+    // 저장소를 못 읽어도 그냥 새로 확인
+  }
+
+  if (healthInflight) return healthInflight;
+
+  healthInflight = (async () => {
+    const res = await fetchHealth(clientVersion);
+    const result: Result<HealthStatus> = res.ok
+      ? { ok: true, data: toHealthStatus(res.data, clientVersion) }
+      : res;
+    const saved: HealthCacheEntry = { savedAt: Date.now(), clientVersion, result };
+    await chrome.storage.local.set({ [HEALTH_CACHE_KEY]: saved }).catch(() => undefined);
+    return result;
+  })().finally(() => {
+    healthInflight = null;
+  });
+  return healthInflight;
+}
+
+function isGetHealth(m: unknown): m is GetHealthMessage {
+  return typeof m === "object" && m !== null && (m as Record<string, unknown>).type === "GET_HEALTH";
+}
+
 function isGetLevelDeltas(m: unknown): m is GetLevelDeltasMessage {
   if (typeof m !== "object" || m === null) return false;
   const o = m as Record<string, unknown>;
@@ -152,6 +238,10 @@ function isGetCachedTagDeltas(m: unknown): m is GetCachedTagDeltasMessage {
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false; 
 
+  if (isGetHealth(message)) {
+    void getHealthCached().then(sendResponse);
+    return true;
+  }
   if (isGetLevelDeltas(message)) {
     void getLevelDeltasCached(message.handle).then(sendResponse);
     return true;

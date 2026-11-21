@@ -54,6 +54,26 @@ export interface TagCacheEntry {
 /** problemId(문자열) -> 엔트리 */
 export type TagCache = Record<string, TagCacheEntry>;
 
+/** GET /health 응답에서 클라이언트가 읽는 필드 (전부 선택) */
+export interface HealthData {
+  status?: string;
+  minClientVersion?: string; // 이 버전 미만은 더 이상 동작을 보장하지 않음
+  latestClientVersion?: string; // 최신 버전 (이보다 낮으면 선택적 업데이트 안내)
+  message?: string; // 팝업에 그대로 보여줄 안내 문구
+  updateUrl?: string; // https:// 만 허용
+}
+
+/** 클라이언트 버전과 비교해 계산한 결과 (content script로 전달) */
+export interface HealthStatus {
+  clientVersion: string;
+  minClientVersion: string | null;
+  latestClientVersion: string | null;
+  updateRequired: boolean;
+  updateAvailable: boolean;
+  message: string | null;
+  updateUrl: string | null;
+}
+
 export type ClientErrorCode =
   | "INVALID_REQUEST"
   | "USER_NOT_FOUND"
@@ -84,4 +104,8 @@ export interface GetTagLevelDeltasMessage {
 export interface GetCachedTagDeltasMessage {
   type: "GET_CACHED_TAG_DELTAS";
   handle: string;
+}
+
+export interface GetHealthMessage {
+  type: "GET_HEALTH";
 }

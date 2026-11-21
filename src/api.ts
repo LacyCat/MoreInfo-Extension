@@ -1,12 +1,17 @@
 import { isTagKey } from "./types.js";
 import type {
   ClientErrorCode,
+  HealthData,
   LevelDeltasData,
   Result,
   TagLevelDeltasData,
 } from "./types.js";
 
 const BASE_URL = "https://moreinfo.lacycat.org";
+// 서버가 v2로 넘어가면 여기만 "v2"로 바꾸면 됨
+const API_VERSION = "v2";
+// 서버의 Health 경로. API_VERSION을 v2로 바꿔도 서버가 /v1/health를 유지하는 동안은 그대로 둠
+const HEALTH_PATH = "/v2/health";
 export const HANDLE_RE = /^[A-Za-z0-9_]{1,30}$/;
 const SERVER_CODES: ClientErrorCode[] = [
   "INVALID_REQUEST",
@@ -101,7 +106,7 @@ async function requestJson(path: string, init: RequestInit = {}): Promise<Result
 export async function fetchLevelDeltas(handle: string): Promise<Result<LevelDeltasData>> {
   if (!HANDLE_RE.test(handle)) return fail("INVALID_REQUEST", "Invalid handle.");
 
-  const r = await requestJson(`/v1/users/${encodeURIComponent(handle)}/level-deltas`);
+  const r = await requestJson(`/${API_VERSION}/users/${encodeURIComponent(handle)}/level-deltas`);
   if (!r.ok) return r;
 
   const data = (r.data as { data?: unknown } | null)?.data;
@@ -130,7 +135,7 @@ export async function fetchTagLevelDeltas(
   }
 
   const r = await requestJson(
-    `/v1/users/${encodeURIComponent(handle)}/tag-level-deltas`,
+    `/${API_VERSION}/users/${encodeURIComponent(handle)}/tag-level-deltas`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -142,4 +147,30 @@ export async function fetchTagLevelDeltas(
   const data = unwrapData(r.data);
   if (!isTagLevelDeltasData(data)) return fail("BAD_RESPONSE", "Invalid data format.");
   return { ok: true, data };
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+export async function fetchHealth(clientVersion: string): Promise<Result<HealthData>> {
+  const r = await requestJson(HEALTH_PATH, {
+    headers: { "X-Client-Version": clientVersion },
+  });
+  if (!r.ok) return r;
+
+  const body = unwrapData(r.data);
+  if (!isRecord(body)) return fail("BAD_RESPONSE", "Invalid data format.");
+
+  const updateUrl = str(body.updateUrl);
+  return {
+    ok: true,
+    data: {
+      status: str(body.status),
+      minClientVersion: str(body.minClientVersion),
+      latestClientVersion: str(body.latestClientVersion),
+      message: str(body.message),
+      updateUrl: updateUrl?.startsWith("https://") ? updateUrl : undefined,
+    },
+  };
 }
