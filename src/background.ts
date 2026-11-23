@@ -14,6 +14,7 @@ import type {
   HealthData,
   HealthStatus,
   LevelDeltasData,
+  Oj,
   Result,
   SetDeltasData,
   TagCache,
@@ -63,12 +64,17 @@ const TAG_CACHE_MAX_ENTRIES = 500;
 const tagInflight = new Map<string, Promise<Result<TagLevelDeltasData>>>();
 let tagWriteChain: Promise<unknown> = Promise.resolve();
 
-function tagCacheKey(handle: string): string {
-  return `tagDeltaCache:${handle.toLowerCase()}`;
+function parseOj(v: unknown): Oj {
+  return v === "doj" ? "doj" : "boj";
 }
 
-async function readTagCache(handle: string): Promise<TagCache> {
-  const key = tagCacheKey(handle);
+// 문제 번호가 BOJ/DOJ 사이에서 겹치므로 DOJ는 키를 따로 둠 (BOJ 키는 예전 그대로 → 기존 캐시 유지)
+function tagCacheKey(handle: string, oj: Oj): string {
+  return `tagDeltaCache:${oj === "doj" ? "doj:" : ""}${handle.toLowerCase()}`;
+}
+
+async function readTagCache(handle: string, oj: Oj): Promise<TagCache> {
+  const key = tagCacheKey(handle, oj);
   try {
     const stored = await chrome.storage.local.get(key);
     return (stored[key] as TagCache | undefined) ?? {};
@@ -78,9 +84,14 @@ async function readTagCache(handle: string): Promise<TagCache> {
 }
 
 // read-modify-write가 겹쳐서 서로 덮어쓰지 않도록 한 줄로 세움
-function saveTagEntry(handle: string, problemId: number, entry: TagCacheEntry): Promise<void> {
+function saveTagEntry(
+  handle: string,
+  oj: Oj,
+  problemId: number,
+  entry: TagCacheEntry
+): Promise<void> {
   const run = tagWriteChain.then(async () => {
-    const cache = await readTagCache(handle);
+    const cache = await readTagCache(handle, oj);
     cache[String(problemId)] = entry;
 
     const ids = Object.keys(cache);
@@ -90,7 +101,7 @@ function saveTagEntry(handle: string, problemId: number, entry: TagCacheEntry): 
         .slice(0, ids.length - TAG_CACHE_MAX_ENTRIES)
         .forEach((id) => delete cache[id]);
     }
-    await chrome.storage.local.set({ [tagCacheKey(handle)]: cache });
+    await chrome.storage.local.set({ [tagCacheKey(handle, oj)]: cache });
   });
   tagWriteChain = run.catch(() => undefined);
   return run;
@@ -101,15 +112,16 @@ async function getTagLevelDeltasCached(
 ): Promise<Result<TagLevelDeltasData>> {
   const tags = [...new Set(msg.tags)].sort();
   const tagsKey = tags.join(",");
+  const oj = parseOj(msg.oj);
 
   // 난이도와 태그가 그대로면 재사용
-  const cache = await readTagCache(msg.handle);
+  const cache = await readTagCache(msg.handle, oj);
   const hit = cache[String(msg.problemId)];
   if (hit && hit.level === msg.level && hit.tagsKey === tagsKey) {
     return { ok: true, data: hit.data };
   }
 
-  const flightKey = `${msg.handle.toLowerCase()}:${msg.problemId}:${msg.level}:${tagsKey}`;
+  const flightKey = `${oj}:${msg.handle.toLowerCase()}:${msg.problemId}:${msg.level}:${tagsKey}`;
   const pending = tagInflight.get(flightKey);
   if (pending) return pending;
 
@@ -122,7 +134,7 @@ async function getTagLevelDeltasCached(
         savedAt: Date.now(),
         data: result.data,
       };
-      await saveTagEntry(msg.handle, msg.problemId, saved).catch(() => undefined);
+      await saveTagEntry(msg.handle, oj, msg.problemId, saved).catch(() => undefined);
     }
     return result;
   })().finally(() => tagInflight.delete(flightKey));
@@ -303,7 +315,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true;
   }
   if (isGetCachedTagDeltas(message)) {
-    void readTagCache(message.handle).then((data) => sendResponse({ ok: true, data }));
+    void readTagCache(message.handle, parseOj(message.oj)).then((data) => sendResponse({ ok: true, data }));
     return true;
   }
   return false;

@@ -100,8 +100,12 @@ export interface GetLevelDeltasMessage {
   handle: string;
 }
 
+/** 확장이 지원하는 저지. 문제 번호가 저지마다 겹치므로 태그 캐시를 이걸로 분리함 (없으면 boj) */
+export type Oj = "boj" | "doj";
+
 export interface GetTagLevelDeltasMessage {
   type: "GET_TAG_LEVEL_DELTAS";
+  oj?: Oj;
   handle: string;
   problemId: number;
   level: number;
@@ -110,6 +114,7 @@ export interface GetTagLevelDeltasMessage {
 
 export interface GetCachedTagDeltasMessage {
   type: "GET_CACHED_TAG_DELTAS";
+  oj?: Oj;
   handle: string;
 }
 

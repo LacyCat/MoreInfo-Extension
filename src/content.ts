@@ -77,6 +77,9 @@ type SetDeltasResult =
 
   const TEST_RATING_OVERRIDE = null as number | null;
 
+  // doj.kr 이면 DOJ 어댑터로 동작 (BOJ와 같은 배지/호버 박스/계산을 그대로 씀)
+  const IS_DOJ = /(^|\.)doj\.kr$/.test(location.hostname);
+
   /* ---------------- 태그 ---------------- */
 
   // BOJ에 표시되는 이름 -> 서버 태그 키 (types.ts의 TAG_KEYS와 같은 목록)
@@ -152,7 +155,7 @@ type SetDeltasResult =
     return label;
   }
 
-  const TIER_COLORS: Record<string, string> = {
+  const BOJ_TIER_COLORS: Record<string, string> = {
     B: "#d6673b",
     S: "#5381a0",
     G: "#ffae35",
@@ -160,18 +163,23 @@ type SetDeltasResult =
     D: "#5387ff",
     R: "#ff217d",
   };
+  const DOJ_TIER_COLORS: Record<string, string> = {
+    B: "#AD5600",
+    S: "#435F7A",
+    G: "#EC9A00",
+    P: "#27E2A4",
+    D: "#00B4FC",
+    R: "#FF0062",
+  };
+  const TIER_COLORS = IS_DOJ ? DOJ_TIER_COLORS : BOJ_TIER_COLORS;
+  const TIER_LETTERS = ["B", "S", "G", "P", "D", "R"] as const;
   function colorForLabel(label: string): string | null {
     return TIER_COLORS[label.charAt(0)] ?? null;
   }
 
   function colorForLevel(level: number): string | null {
     if (!Number.isInteger(level) || level < 1 || level > 30) return null;
-    if (level <= 5) return "#d6673b";
-    if (level <= 10) return "#5381a0";
-    if (level <= 15) return "#ffae35";
-    if (level <= 20) return "#1cd690";
-    if (level <= 25) return "#5387ff";
-    return "#ff217d";
+    return TIER_COLORS[TIER_LETTERS[Math.floor((level - 1) / 5)] ?? ""] ?? null;
   }
 
   function levelFromImg(img: HTMLImageElement | null): number | null {
@@ -244,6 +252,7 @@ type SetDeltasResult =
   ): Promise<TagDeltasResult> {
     const res = await send<TagDeltasResult>({
       type: "GET_TAG_LEVEL_DELTAS",
+      oj: IS_DOJ ? "doj" : "boj",
       handle,
       problemId,
       level,
@@ -260,6 +269,10 @@ type SetDeltasResult =
         return "유저 정보를 찾을 수 없어요.";
       case "NETWORK_ERROR":
         return "서버에 연결하지 못했어요.";
+      case "TAGS_HIDDEN":
+        return "문제의 '태그 보기'를 먼저 눌러 주세요. 태그를 펼치면 태그별 변화량을 볼 수 있어요.";
+      case "NO_TAGS":
+        return "태그별 변화량을 계산할 수 있는 태그가 없어요.";
       default:
         return "불러오지 못했어요. 다시 호버하면 재시도해요.";
     }
@@ -287,7 +300,7 @@ type SetDeltasResult =
     return { delta, color, change: after !== before ? { before, after } : null };
   }
 
-  type BadgeLayout = "list" | "title";
+  type BadgeLayout = "list" | "title" | "inline";
 
   /* 무지개 효과: <style> 없이 인라인 스타일 + Web Animations로 구현 (그라데이션 글자가 흐르고, 글로우 색이 한 바퀴 돎) */
   const RAINBOW_LOOP = [
@@ -336,26 +349,33 @@ type SetDeltasResult =
     const layoutStyle =
       layout === "list"
         ? "float:right;margin-left:12px;position:relative;"
-        : "margin-left:0.6em;font-size:0.5em;vertical-align:middle;display:inline-block;position:relative;";
+        : layout === "inline"
+          ? "margin-left:10px;font-size:14px;display:inline-flex;align-items:center;vertical-align:middle;position:relative;"
+          : "margin-left:0.6em;font-size:0.5em;vertical-align:middle;display:inline-block;position:relative;";
     el.style.cssText = `${layoutStyle}font-weight:bold;white-space:nowrap;color:${p.color};`;
 
-    const tierSpan = (label: string): HTMLSpanElement => {
+    // 텍스트 전용 래퍼: 무지개(투명 글자 + 글로우)는 여기에만 걸고,
+    // 호버 박스는 el 의 자식(label 의 형제)으로 붙어서 영향을 안 받게 함
+    const label = document.createElement("span");
+
+    const tierSpan = (name: string): HTMLSpanElement => {
       const s = document.createElement("span");
-      s.textContent = label;
-      const c = rainbow ? null : colorForLabel(label); // 무지개일 땐 부모의 그라데이션을 그대로 씀
+      s.textContent = name;
+      const c = rainbow ? null : colorForLabel(name); // 무지개일 땐 부모의 그라데이션을 그대로 씀
       if (c !== null) s.style.color = c;
       return s;
     };
 
-    el.append(`+${p.delta}`);
+    label.append(`+${p.delta}`);
     if (p.change) {
-      el.append(" (", tierSpan(p.change.before), " -> ", tierSpan(p.change.after), ")");
+      label.append(" (", tierSpan(p.change.before), " -> ", tierSpan(p.change.after), ")");
       el.title = `이 문제를 풀면 예상 레이팅 +${p.delta}, 티어 ${p.change.before} -> ${p.change.after}`;
     } else {
       el.title = `이 문제를 풀면 예상 레이팅 +${p.delta}`;
     }
 
-    if (rainbow) applyRainbow(el);
+    if (rainbow) applyRainbow(label);
+    el.append(label);
     return el;
   }
 
@@ -552,20 +572,82 @@ type SetDeltasResult =
     initial: TagLevelDeltasData | null; // 이미 캐시에 있는 값
     load: (() => Promise<TagDeltasResult>) | null; // 없으면 호버 시 요청
     emptyMessage: string; // initial도 load도 없을 때 보여줄 문구
+    // true면 박스를 body에 붙이고 position:fixed로 띄움 (표가 overflow 컨테이너 안에 있어 잘리는 사이트용)
+    floating?: boolean;
+  }
+
+  const floatingBoxes = new Set<{ badge: HTMLElement; box: HTMLElement }>();
+
+  /** 배지가 사라진(페이지 전환/표 갱신) floating 박스를 body에서 치움 */
+  function sweepFloatingBoxes(): void {
+    for (const item of Array.from(floatingBoxes)) {
+      if (!item.badge.isConnected) {
+        item.box.remove();
+        floatingBoxes.delete(item);
+      }
+    }
   }
 
   function attachTagBox(badge: HTMLElement, align: "left" | "right", source: TagBoxSource): void {
     const { box, panel } = makeBox(align);
-    badge.append(box);
+    const floating = source.floating === true;
+    if (floating) {
+      css(box, { position: "fixed", top: "0px", left: "", right: "", zIndex: "2147483000" });
+      document.body.append(box);
+      floatingBoxes.add({ badge, box });
+    } else {
+      badge.append(box);
+    }
     badge.removeAttribute("title"); // 네이티브 툴팁이 박스 위에 겹치지 않게
     badge.style.cursor = "help";
 
     let data = source.initial;
     let loading = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let closeTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // floating 박스를 배지 아래(공간이 없으면 위)에 붙이고, 화면 밖으로 나가지 않게 보정
+    const place = (): void => {
+      if (!floating) return;
+      const r = badge.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      const vh = window.innerHeight;
+      const w = box.offsetWidth;
+      if (align === "right") {
+        box.style.left = "";
+        box.style.right = `${Math.max(0, vw - Math.max(r.right, Math.min(w, vw)))}px`;
+      } else {
+        box.style.right = "";
+        box.style.left = `${Math.max(0, Math.min(r.left, vw - w))}px`;
+      }
+      box.style.paddingTop = "6px";
+      box.style.paddingBottom = "0px";
+      box.style.top = `${r.bottom}px`;
+      const h = box.offsetHeight;
+      if (r.bottom + h > vh && r.top - h > 0) {
+        box.style.paddingTop = "0px";
+        box.style.paddingBottom = "6px";
+        box.style.top = `${r.top - h}px`;
+      }
+    };
+
+    const closeNow = (): void => {
+      clearTimeout(timer);
+      clearTimeout(closeTimer);
+      box.style.display = "none";
+      if (floating) {
+        window.removeEventListener("scroll", closeNow, true);
+        window.removeEventListener("resize", closeNow);
+      }
+    };
 
     const open = (): void => {
       box.style.display = "block";
+      if (floating) {
+        place();
+        window.addEventListener("scroll", closeNow, true);
+        window.addEventListener("resize", closeNow);
+      }
       box.animate(
         [
           { opacity: 0, transform: "translateY(-4px) scale(0.97)" },
@@ -576,16 +658,19 @@ type SetDeltasResult =
 
       if (data) {
         renderData(panel, data);
+        place();
         return;
       }
       if (!source.load) {
         renderMessage(panel, source.emptyMessage);
+        place();
         return;
       }
       if (loading) return; // 이미 로딩 표시 중
 
       loading = true;
       renderLoading(panel);
+      place();
       void source.load().then((res) => {
         loading = false;
         if (res.ok) {
@@ -595,17 +680,28 @@ type SetDeltasResult =
           console.debug("[BOJ Rating Preview]", res.code);
           renderMessage(panel, errorText(res.code));
         }
+        place(); // 내용이 바뀌면 높이도 바뀜
       });
     };
 
     badge.addEventListener("mouseenter", () => {
       clearTimeout(timer);
-      timer = setTimeout(open, HOVER_DELAY_MS);
+      clearTimeout(closeTimer);
+      timer = setTimeout(() => {
+        if (box.style.display !== "block") open();
+      }, HOVER_DELAY_MS);
     });
     badge.addEventListener("mouseleave", () => {
       clearTimeout(timer);
-      box.style.display = "none";
+      if (floating) closeTimer = setTimeout(closeNow, 120); // 배지 → 박스로 마우스가 건너갈 시간
+      else box.style.display = "none";
     });
+    if (floating) {
+      box.addEventListener("mouseenter", () => clearTimeout(closeTimer));
+      box.addEventListener("mouseleave", () => {
+        closeTimer = setTimeout(closeNow, 120);
+      });
+    }
   }
 
   /* ---------------- 페이지 적용 ---------------- */
@@ -894,6 +990,285 @@ type SetDeltasResult =
     });
   }
 
+  /* ---------------- DOJ (doj.kr) ---------------- */
+  // DOJ는 Next.js SPA라 페이지 이동/표 갱신이 새로고침 없이 일어남 → MutationObserver로 계속 확인함.
+  // 난이도/태그는 사이트가 기본으로 숨겨 두므로(스포일러 방지), 사용자가 직접 공개한 뒤에만 표시함.
+
+  const DOJ_LOCALE = "(?:/[A-Za-z]{2}(?:-[A-Za-z]{2})?)?";
+  const DOJ_LIST_PATH_RE = new RegExp(`^${DOJ_LOCALE}/problems/?$`);
+  const DOJ_PROBLEM_PATH_RE = new RegExp(`^${DOJ_LOCALE}/problems/(\\d+)/?$`);
+
+  const DOJ_HANDLE_SELECTOR = ".header-user-trigger .rated-handle-text";
+  const DOJ_LIST_TABLE_SELECTOR = "table.doj-archive-table";
+  const DOJ_UNTRIED_SELECTOR = ".doj-score-empty"; // 상태 칸의 "미시도"
+  const DOJ_DIFFICULTY_BADGE_SELECTOR = ".doj-difficulty-badge";
+  const DOJ_TITLE_DIFFICULTY_SELECTOR = ".problem-title-difficulty";
+  const DOJ_TAG_SECTION_SELECTOR = ".problem-tags-section";
+  const DOJ_TAG_TOGGLE_SELECTOR = ".problem-meta-tag-toggle";
+  const DOJ_KEY_ATTR = "data-moreinfo-key";
+  const DOJ_STATE_TTL_MS = 60_000;
+
+  const DOJ_TIER_NAMES = ["bronze", "silver", "gold", "platinum", "diamond", "ruby"];
+  const ROMAN_TO_NUM: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5 };
+
+  /** "Silver V" / "S5" 같은 표기 -> 난이도 레벨(1~30). 해석 못 하면(언레이티드 포함) null */
+  function levelFromDojTierText(text: string): number | null {
+    const full = /\b(Bronze|Silver|Gold|Platinum|Diamond|Ruby)\s+(IV|V|I{1,3})\b/i.exec(text);
+    if (full && full[1] !== undefined && full[2] !== undefined) {
+      const tier = DOJ_TIER_NAMES.indexOf(full[1].toLowerCase());
+      const n = ROMAN_TO_NUM[full[2].toLowerCase()];
+      if (tier >= 0 && n !== undefined) return tier * 5 + (6 - n);
+    }
+    const short = /\b([BSGPDR])([1-5])\b/.exec(text);
+    if (short && short[1] !== undefined && short[2] !== undefined) {
+      return "BSGPDR".indexOf(short[1]) * 5 + (6 - Number(short[2]));
+    }
+    return null;
+  }
+
+  /** strict면 .doj-difficulty-badge 가 있을 때만 읽음 (목록 행에서 엉뚱한 글자를 티어로 오인하지 않게) */
+  function readDojLevel(root: Element, strict: boolean): number | null {
+    const badge = root.querySelector<HTMLElement>(DOJ_DIFFICULTY_BADGE_SELECTOR);
+    if (!badge && strict) return null;
+    const scope: Element = badge ?? root;
+    const texts: Array<string | null | undefined> = [
+      scope.getAttribute("title"),
+      scope.querySelector(".doj-archive-difficulty-compact")?.textContent,
+      scope.textContent,
+    ];
+    for (const t of texts) {
+      if (!t) continue;
+      const level = levelFromDojTierText(t);
+      if (level !== null) return level;
+    }
+    return null;
+  }
+
+  function getDojHandle(): string | null {
+    const ok = (v: string): boolean => /^[A-Za-z0-9_]{1,30}$/.test(v);
+    const text = document.querySelector(DOJ_HANDLE_SELECTOR)?.textContent?.trim() ?? "";
+    if (ok(text)) return text;
+    const label = document.querySelector(".header-user-trigger")?.getAttribute("aria-label") ?? "";
+    const first = label.split(/\s+/)[0] ?? "";
+    return ok(first) ? first : null;
+  }
+
+  // DOJ 태그 표기 -> 서버 태그 키. 공백/기호를 지우고 소문자로 맞춘 뒤 비교함
+  const DOJ_TAG_ALIASES: Array<[string, string[]]> = [
+    ["math", ["수학", "math", "mathematics"]],
+    ["impl", ["구현", "implementation", "impl"]],
+    ["dp", ["다이나믹프로그래밍", "동적계획법", "dp", "dynamicprogramming"]],
+    ["greedy", ["그리디알고리즘", "그리디", "greedy"]],
+    ["string", ["문자열", "string", "strings"]],
+    ["graph", ["그래프이론", "그래프", "graph", "graphtheory"]],
+    ["geom", ["기하학", "기하", "geometry"]],
+    ["ds", ["자료구조", "datastructure", "datastructures", "ds"]],
+  ];
+  const DOJ_TAG_KEY_BY_NAME = new Map<string, string>(
+    DOJ_TAG_ALIASES.flatMap(([key, names]) => names.map((n) => [n, key] as [string, string]))
+  );
+  const normDojTag = (s: string): string => s.replace(/^#/, "").replace(/[\s\-_]+/g, "").toLowerCase();
+
+  /** 공개된 태그에서 서버가 아는 키만 읽음. 태그가 아직 접혀 있으면 "hidden" */
+  function readDojTagKeys(): string[] | "hidden" {
+    const section = document.querySelector<HTMLElement>(DOJ_TAG_SECTION_SELECTOR);
+    const toggle = document.querySelector(DOJ_TAG_TOGGLE_SELECTOR);
+    const keys = new Set<string>();
+    if (section) {
+      for (const el of Array.from(section.querySelectorAll<HTMLElement>("*"))) {
+        if (el === toggle || el.children.length > 0) continue;
+        const text = el.textContent?.trim() ?? "";
+        if (text.length === 0 || text.length > 40) continue;
+        const key = DOJ_TAG_KEY_BY_NAME.get(normDojTag(text));
+        if (key) keys.add(key);
+      }
+    }
+    if (keys.size === 0 && toggle) return "hidden";
+    return Array.from(keys).sort();
+  }
+
+  async function loadDojTags(
+    handle: string,
+    problemId: number,
+    level: number
+  ): Promise<TagDeltasResult> {
+    const tags = readDojTagKeys(); // 호버할 때마다 다시 읽음 (그 사이에 태그를 펼쳤을 수 있음)
+    if (tags === "hidden") return { ok: false, code: "TAGS_HIDDEN", message: "tags are collapsed" };
+    if (tags.length === 0) return { ok: false, code: "NO_TAGS", message: "no supported tags" };
+    return requestTagDeltas(handle, problemId, level, tags);
+  }
+
+  interface DojState {
+    rating: number;
+    deltas: number[];
+  }
+  let dojStateCache: { handle: string; at: number; value: Promise<DojState | null> } | null = null;
+
+  function getDojState(handle: string): Promise<DojState | null> {
+    if (dojStateCache && dojStateCache.handle === handle && Date.now() - dojStateCache.at < DOJ_STATE_TTL_MS) {
+      return dojStateCache.value;
+    }
+    const value = send<DeltasResult>({ type: "GET_LEVEL_DELTAS", handle }).then((res) => {
+      if (!res || !res.ok) {
+        console.debug("[BOJ Rating Preview]", "level-deltas failed:", res && !res.ok ? res.code : "no response");
+        return null;
+      }
+      return { rating: TEST_RATING_OVERRIDE ?? res.data.current.rating, deltas: res.data.deltaByLevel };
+    });
+    dojStateCache = { handle, at: Date.now(), value };
+    return value;
+  }
+
+  // 목록에서 보여줄 "문제 페이지에서 이미 계산한 태그별 값" (경로가 바뀔 때마다 새로 읽음)
+  let dojTagCache: { path: string; value: Promise<CachedTagMap> } | null = null;
+
+  function getDojTagCache(handle: string, path: string): Promise<CachedTagMap> {
+    if (dojTagCache && dojTagCache.path === path) return dojTagCache.value;
+    const value = send<CachedTagResult>({ type: "GET_CACHED_TAG_DELTAS", oj: "doj", handle }).then(
+      (res) => (res && res.ok ? res.data : {})
+    );
+    dojTagCache = { path, value };
+    return value;
+  }
+
+  function applyToDojTable(state: DojState, cached: CachedTagMap): void {
+    const table = document.querySelector<HTMLTableElement>(DOJ_LIST_TABLE_SELECTOR);
+    if (!table) return;
+
+    for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"))) {
+      // 제목 칸 = 문제 링크가 든 칸
+      const cell = row.querySelector("a.doj-problem-cell")?.closest("td") ?? null;
+      if (!cell) continue;
+
+      const idText = row.querySelector(".doj-archive-col-id")?.textContent?.trim() ?? "";
+      const id = /^\d+$/.test(idText) ? Number(idText) : null;
+      const level = readDojLevel(row, true);
+      // 시도한 적 없는 문제만 표시 (이미 푼 문제에 "+N"이 뜨면 오해를 부름)
+      const untried = row.querySelector(DOJ_UNTRIED_SELECTOR) !== null;
+      const p = id !== null && level !== null && untried ? predict(level, state.deltas, state.rating) : null;
+      const key = p ? `${id}:${level}:${state.rating}` : null;
+
+      // React가 행을 재사용해 내용만 바꿀 수 있으니, 문제/난이도/레이팅이 달라졌으면 배지를 다시 만듦
+      const existing = cell.querySelector<HTMLElement>(`.${BADGE_CLASS}`);
+      if (existing && existing.getAttribute(DOJ_KEY_ATTR) === key) continue;
+      existing?.remove();
+      if (!p || key === null || id === null || level === null) continue;
+
+      const badge = makeBadge(p, "list");
+      badge.setAttribute(DOJ_KEY_ATTR, key);
+      cell.prepend(badge);
+
+      const entry = cached[String(id)];
+      attachTagBox(badge, "right", {
+        initial: entry && entry.level === level ? entry.data : null,
+        load: null,
+        floating: true,
+        emptyMessage:
+          "이 문제의 태그 정보가 아직 없어요. 문제 페이지에서 태그를 펼치고 배지에 호버하면 여기에도 표시돼요.",
+      });
+    }
+  }
+
+  function applyToDojProblem(state: DojState, handle: string, problemId: number): void {
+    const wrap = document.querySelector<HTMLElement>(DOJ_TITLE_DIFFICULTY_SELECTOR);
+    const parent = wrap?.parentElement;
+    if (!wrap || !parent) return;
+
+    // 사용자가 "난이도 보기"를 누르기 전에는 level이 null → 아무것도 붙이지 않음 (+N이 난이도를 알려주므로)
+    const level = readDojLevel(wrap, false);
+    const p = level !== null ? predict(level, state.deltas, state.rating) : null;
+    const key = p ? `${problemId}:${level}:${state.rating}` : null;
+
+    const existing = Array.from(parent.children).find(
+      (c): c is HTMLElement => c instanceof HTMLElement && c.classList.contains(BADGE_CLASS)
+    );
+    if (existing && existing.getAttribute(DOJ_KEY_ATTR) === key) return;
+    existing?.remove();
+    if (!p || key === null || level === null) return;
+
+    const badge = makeBadge(p, "inline");
+    badge.setAttribute(DOJ_KEY_ATTR, key);
+    wrap.after(badge); // 난이도 오른쪽
+    attachTagBox(badge, "left", {
+      initial: null,
+      load: () => loadDojTags(handle, problemId, level),
+      floating: true,
+      emptyMessage: "",
+    });
+  }
+
+  let dojNoticeChecked = false;
+
+  async function scanDoj(): Promise<void> {
+    sweepFloatingBoxes();
+
+    const path = location.pathname;
+    const isList = DOJ_LIST_PATH_RE.test(path);
+    const m = DOJ_PROBLEM_PATH_RE.exec(path);
+    if (!isList && !(m && m[1] !== undefined)) return;
+
+    if (!dojNoticeChecked) {
+      dojNoticeChecked = true;
+      void checkUpdateNotice();
+    }
+
+    const handle = getDojHandle();
+    if (!handle) return; // 로그인 필요 (헤더가 아직 안 그려졌을 수도 있어서 다음 변화 때 다시 시도)
+
+    const state = await getDojState(handle);
+    if (!state || location.pathname !== path) return;
+
+    if (isList) {
+      const cached = await getDojTagCache(handle, path);
+      if (location.pathname !== path) return; // 기다리는 사이 다른 페이지로 이동함
+      applyToDojTable(state, cached);
+    } else if (m && m[1] !== undefined) {
+      applyToDojProblem(state, handle, Number(m[1]));
+    }
+  }
+
+  function mainDoj(): void {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let running = false;
+    let again = false;
+
+    const run = async (): Promise<void> => {
+      if (running) {
+        again = true;
+        return;
+      }
+      running = true;
+      try {
+        await scanDoj();
+      } catch (e) {
+        console.debug("[BOJ Rating Preview]", "scan failed", e);
+      } finally {
+        running = false;
+        if (again) {
+          again = false;
+          schedule();
+        }
+      }
+    };
+    const schedule = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void run(), 150);
+    };
+
+    // 우리가 넣은 요소 안에서 일어난 변화는 무시 (스캔이 스캔을 부르지 않게)
+    const own = `.boj-tag-delta-box, .${BADGE_CLASS}, .${UPDATE_NOTICE_CLASS}`;
+    new MutationObserver((mutations) => {
+      for (const mu of mutations) {
+        const el = mu.target instanceof Element ? mu.target : mu.target.parentElement;
+        if (el && el.closest(own)) continue;
+        schedule();
+        return;
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+
+    schedule();
+  }
+
   async function main(): Promise<void> {
     const table = findProblemTable();
     const titleEl = document.querySelector<HTMLElement>(PROBLEM_TITLE_SELECTOR);
@@ -939,5 +1314,6 @@ type SetDeltasResult =
     if (titleEl) applyToProblemPage(titleEl, deltas, rating, handle);
   }
 
-  void main();
+  if (IS_DOJ) mainDoj();
+  else void main();
 })();
