@@ -42,12 +42,19 @@ type HealthResult =
   | { ok: true; data: HealthStatus }
   | { ok: false; code: string; message: string };
 
+interface SetDeltasData {
+  current: { rating: number };
+  deltas: number[];
+}
+type SetDeltasResult =
+  | { ok: true; data: SetDeltasData }
+  | { ok: false; code: string; message: string };
+
 (() => {
 
   const TABLE_SELECTOR = "table#problemset";
-  const TITLE_CELL_INDEX = 1; 
-  const TIER_IMG_SELECTOR = "img.solvedac-tier"; 
-  const SOLVED_LABEL_SELECTOR = ".problem-label-ac"; 
+  const TIER_IMG_SELECTOR = "img.solvedac-tier";
+  const SOLVED_LABEL_SELECTOR = ".problem-label-ac";
 
   const PROBLEM_TITLE_SELECTOR = "#problem_title";
   const PROBLEM_MENU_IMG_SELECTOR = ".problem-menu img.solvedac-tier";
@@ -55,6 +62,16 @@ type HealthResult =
   const PROBLEM_TAG_SELECTOR = '#problem_tags a[href*="/problem/tag/"]';
   // 목록 표의 문제 번호 칸
   const LIST_PROBLEM_ID_SELECTOR = "td.list_problem_id";
+
+  // 문제집(/workbook/view/N): 표에 id가 없고 제목은 .page-header h1
+  const WORKBOOK_PATH_RE = /^\/workbook\/view\//;
+  const WORKBOOK_TABLE_SELECTOR = ".table-responsive table";
+  const WORKBOOK_TITLE_SELECTOR = ".page-header h1";
+  const LEVEL_COUNT = 31; // 난이도 0~30 (set-deltas 요청의 각 set 길이)
+
+  // ?imfeelinglucky 를 붙여 연 문제 목록(/problemset)에서는 모든 배지가 무지개로 빛남
+  const LUCKY_PATH_RE = /^\/problemset/;
+  const LUCKY_PARAM = "imfeelinglucky";
 
   const BADGE_CLASS = "boj-rating-delta";
 
@@ -91,14 +108,14 @@ type HealthResult =
   type IconDef = string | string[] | { d: string | string[]; mode?: IconMode };
 
   const TAG_ICON_PATHS: Record<string, IconDef> = {
-    math: ["M3 19a2 2 0 0 0 2 2c2 0 2 -4 3 -9s1 -9 3 -9a2 2 0 0 1 2 2", "M5 12h6", "M15 12l6 6", "M15 18l6 -6"],
-    impl: ["M11.414 10l-7.383 7.418a2.091 2.091 0 0 0 0 2.967a2.11 2.11 0 0 0 2.976 0l7.407 -7.385", "M18.121 15.293l2.586 -2.586a1 1 0 0 0 0 -1.414l-7.586 -7.586a1 1 0 0 0 -1.414 0l-2.586 2.586a1 1 0 0 0 0 1.414l7.586 7.586a1 1 0 0 0 1.414 0"],
-    dp: ["M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3", "M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3", "M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"],
-    greedy: ["M15 11v.01", "M5.173 8.378a3 3 0 1 1 4.656 -1.377", "M16 4v3.803a6.019 6.019 0 0 1 2.658 3.197h1.341a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-1.342c-.336 .95 -.907 1.8 -1.658 2.473v2.027a1.5 1.5 0 0 1 -3 0v-.583a6.04 6.04 0 0 1 -1 .083h-4a6.04 6.04 0 0 1 -1 -.083v.583a1.5 1.5 0 0 1 -3 0v-2l0 -.027a6 6 0 0 1 4 -10.473h2.5l4.5 -3"],
-    string: ["M3 16v-6a2 2 0 1 1 4 0v6", "M3 13h4", "M10 8v6a2 2 0 1 0 4 0v-1a2 2 0 1 0 -4 0v1", "M20.732 12a2 2 0 0 0 -3.732 1v1a2 2 0 0 0 3.726 1.01"],
-    graph: ["M14 6a2 2 0 1 0 -4 0a2 2 0 0 0 4 0", "M7 14a2 2 0 1 0 -4 0a2 2 0 0 0 4 0", "M21 14a2 2 0 1 0 -4 0a2 2 0 0 0 4 0", "M14 18a2 2 0 1 0 -4 0a2 2 0 0 0 4 0", "M12 8v8", "M6.316 12.496l4.368 -4.992", "M17.684 12.496l-4.366 -4.99"],
-    geom: ["M5 4h14a1 1 0 0 1 1 1v5a1 1 0 0 1 -1 1h-7a1 1 0 0 0 -1 1v7a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1v-14a1 1 0 0 1 1 -1", "M4 8l2 0", "M4 12l3 0", "M4 16l2 0", "M8 4l0 2", "M12 4l0 3", "M16 4l0 2"],
-    ds: ["M4 6a8 3 0 1 0 16 0a8 3 0 1 0 -16 0", "M4 6v6a8 3 0 0 0 16 0v-6", "M4 12v6a8 3 0 0 0 16 0v-6"],
+    math: "",
+    impl: "",
+    dp: "",
+    greedy: "",
+    string: "",
+    graph: "",
+    geom: "",
+    ds: "",
   };
   const ICON_VIEWBOX = "0 0 24 24";
   // stroke: 선 아이콘(Lucide/Feather/Tabler 계열) — fill=none, stroke=currentColor
@@ -147,22 +164,20 @@ type HealthResult =
     return TIER_COLORS[label.charAt(0)] ?? null;
   }
 
-
   function colorForLevel(level: number): string | null {
     if (!Number.isInteger(level) || level < 1 || level > 30) return null;
-    if (level <= 5) return "#d6673b"; 
-    if (level <= 10) return "#5381a0"; 
-    if (level <= 15) return "#ffae35"; 
-    if (level <= 20) return "#1cd690"; 
-    if (level <= 25) return "#5387ff"; 
-    return "#ff217d"; 
+    if (level <= 5) return "#d6673b";
+    if (level <= 10) return "#5381a0";
+    if (level <= 15) return "#ffae35";
+    if (level <= 20) return "#1cd690";
+    if (level <= 25) return "#5387ff";
+    return "#ff217d";
   }
 
   function levelFromImg(img: HTMLImageElement | null): number | null {
     const m = /(-?\d+)\.svg(?:$|[?#])/.exec(img?.getAttribute("src") ?? "");
     return m && m[1] !== undefined ? Number(m[1]) : null;
   }
-
 
   function getHandle(): string | null {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="username"]');
@@ -184,7 +199,22 @@ type HealthResult =
 
   function problemIdFromRow(row: HTMLTableRowElement): number | null {
     const text = row.querySelector(LIST_PROBLEM_ID_SELECTOR)?.textContent?.trim() ?? "";
-    return /^\d+$/.test(text) ? Number(text) : null;
+    if (/^\d+$/.test(text)) return Number(text);
+
+    // 문제집 표에는 list_problem_id가 없음 → 문제 링크에서 읽음
+    for (const a of Array.from(row.querySelectorAll<HTMLAnchorElement>('a[href*="/problem/"]'))) {
+      const m = /^\/problem\/(\d+)\/?$/.exec(a.pathname);
+      if (m && m[1] !== undefined) return Number(m[1]);
+    }
+    return null;
+  }
+
+  function findProblemTable(): HTMLTableElement | null {
+    const byId = document.querySelector<HTMLTableElement>(TABLE_SELECTOR);
+    if (byId) return byId;
+    return WORKBOOK_PATH_RE.test(location.pathname)
+      ? document.querySelector<HTMLTableElement>(WORKBOOK_TABLE_SELECTOR)
+      : null;
   }
 
   function readTagKeys(): string[] {
@@ -195,7 +225,6 @@ type HealthResult =
     }
     return Array.from(keys).sort();
   }
-
 
   /* ---------------- 백그라운드 통신 ---------------- */
 
@@ -236,7 +265,6 @@ type HealthResult =
     }
   }
 
-
   /* ---------------- 예측 / 배지 ---------------- */
 
   interface Prediction {
@@ -261,7 +289,47 @@ type HealthResult =
 
   type BadgeLayout = "list" | "title";
 
-  function makeBadge(p: Prediction, layout: BadgeLayout): HTMLSpanElement {
+  /* 무지개 효과: <style> 없이 인라인 스타일 + Web Animations로 구현 (그라데이션 글자가 흐르고, 글로우 색이 한 바퀴 돎) */
+  const RAINBOW_LOOP = [
+    "#ff3b3b",
+    "#ff9f1c",
+    "#ffe14d",
+    "#3ddc84",
+    "#2ec5ff",
+    "#5b6bff",
+    "#c264ff",
+    "#ff3b3b", // 처음 색으로 돌아와야 끊김 없이 이어짐
+  ];
+  const RAINBOW_PERIOD_MS = 3000;
+
+  function applyRainbow(el: HTMLElement): void {
+    css(el, {
+      backgroundImage: `linear-gradient(90deg, ${RAINBOW_LOOP.join(", ")})`,
+      backgroundSize: "200% 100%",
+      backgroundClip: "text",
+      color: "transparent",
+    });
+    el.style.setProperty("-webkit-background-clip", "text");
+    el.style.setProperty("-webkit-text-fill-color", "transparent");
+    el.style.filter = `drop-shadow(0 0 3px ${RAINBOW_LOOP[0]}) drop-shadow(0 0 7px ${RAINBOW_LOOP[0]})`;
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return; // 움직임 줄이기 설정이면 정지 상태로
+
+    el.animate(
+      [{ backgroundPosition: "0% 50%" }, { backgroundPosition: "200% 50%" }],
+      { duration: RAINBOW_PERIOD_MS, iterations: Infinity, easing: "linear" }
+    );
+    el.animate(
+      RAINBOW_LOOP.map((c) => ({ filter: `drop-shadow(0 0 3px ${c}) drop-shadow(0 0 7px ${c})` })),
+      { duration: RAINBOW_PERIOD_MS, iterations: Infinity, easing: "linear" }
+    );
+  }
+
+  /** 마스터(M)에 도달하는 배지(예: R1 -> M)는 항상 무지개 */
+  const reachesMaster = (p: Prediction): boolean => p.change !== null && p.change.after === "M";
+
+  function makeBadge(p: Prediction, layout: BadgeLayout, forceRainbow = false): HTMLSpanElement {
+    const rainbow = forceRainbow || reachesMaster(p);
     const el = document.createElement("span");
     el.className = BADGE_CLASS;
     // position:relative — 호버 박스를 배지 기준으로 띄우기 위함
@@ -274,7 +342,7 @@ type HealthResult =
     const tierSpan = (label: string): HTMLSpanElement => {
       const s = document.createElement("span");
       s.textContent = label;
-      const c = colorForLabel(label);
+      const c = rainbow ? null : colorForLabel(label); // 무지개일 땐 부모의 그라데이션을 그대로 씀
       if (c !== null) s.style.color = c;
       return s;
     };
@@ -286,9 +354,12 @@ type HealthResult =
     } else {
       el.title = `이 문제를 풀면 예상 레이팅 +${p.delta}`;
     }
+
+    if (rainbow) applyRainbow(el);
     return el;
   }
 
+  // css()는 아래 호버 박스 섹션에 있음 (함수 선언이라 위에서 써도 됨)
 
   /* ---------------- 호버 박스 ---------------- */
   // <style>을 주입하지 않고(페이지 CSS/CSP와 충돌 방지) 인라인 스타일 + Web Animations만 사용
@@ -537,26 +608,29 @@ type HealthResult =
     });
   }
 
-
   /* ---------------- 페이지 적용 ---------------- */
 
   function applyToTable(
     table: HTMLTableElement,
     deltas: number[],
     rating: number,
-    cached: CachedTagMap
+    cached: CachedTagMap,
+    lucky: boolean
   ): void {
     for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"))) {
-      const cell = row.cells[TITLE_CELL_INDEX];
-      if (!cell || cell.querySelector(`.${BADGE_CLASS}`)) continue;
-      if (row.querySelector(SOLVED_LABEL_SELECTOR)) continue; 
+      // 열 순서는 페이지마다 다름(문제 목록: 2번째, 단계별 문제: 3번째) → 티어 아이콘이 든 칸을 제목 칸으로 사용.
+      // 단계별 문제의 설명 행(colspan)처럼 아이콘이 없는 행은 여기서 걸러짐
+      const img = row.querySelector<HTMLImageElement>(TIER_IMG_SELECTOR);
+      const cell = img?.closest("td");
+      if (!img || !cell || cell.querySelector(`.${BADGE_CLASS}`)) continue;
+      if (row.querySelector(SOLVED_LABEL_SELECTOR)) continue;
 
-      const level = levelFromImg(cell.querySelector<HTMLImageElement>(TIER_IMG_SELECTOR));
+      const level = levelFromImg(img);
       const p = predict(level, deltas, rating);
       if (!p) continue;
 
-      const badge = makeBadge(p, "list");
-      cell.prepend(badge); 
+      const badge = makeBadge(p, "list", lucky);
+      cell.prepend(badge);
 
       // 목록에는 태그 정보가 없으므로, 문제 페이지에서 이미 캐시된 (난이도가 같은) 것만 표시하고, 없으면 안내 문구만 띄움
       const id = problemIdFromRow(row);
@@ -579,7 +653,7 @@ type HealthResult =
   ): void {
     const heading = titleEl.parentElement;
     if (!heading || heading.querySelector(`.${BADGE_CLASS}`)) return;
-    if (heading.querySelector(SOLVED_LABEL_SELECTOR)) return; 
+    if (heading.querySelector(SOLVED_LABEL_SELECTOR)) return;
 
     const level = levelFromImg(
       document.querySelector<HTMLImageElement>(PROBLEM_MENU_IMG_SELECTOR)
@@ -604,11 +678,69 @@ type HealthResult =
     attachTagBox(badge, "left", { initial: null, load, emptyMessage });
   }
 
+  /* ---------------- 문제집: 제목 옆 총 상승 레이팅 ---------------- */
+
+  // 아직 안 푼 문제의 난이도별 개수 (인덱스 = 난이도). 난이도 없는 문제(0)는 상승분이 없어 제외
+  function countUnsolvedByLevel(table: HTMLTableElement): { counts: number[]; total: number } {
+    const counts = new Array<number>(LEVEL_COUNT).fill(0);
+    let total = 0;
+    for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"))) {
+      const img = row.querySelector<HTMLImageElement>(TIER_IMG_SELECTOR);
+      if (!img || row.querySelector(SOLVED_LABEL_SELECTOR)) continue;
+      const level = levelFromImg(img);
+      if (level === null || !Number.isInteger(level) || level < 1 || level > 30) continue;
+      counts[level] = (counts[level] ?? 0) + 1;
+      total++;
+    }
+    return { counts, total };
+  }
+
+  // 총 레이팅을 못 받았을 때 조용히 사라지지 않도록, 회색 "?" 배지로 이유를 보여줌
+  function showWorkbookError(heading: HTMLElement, code: string): void {
+    if (heading.querySelector(`.${BADGE_CLASS}`)) return;
+    const el = document.createElement("span");
+    el.className = BADGE_CLASS;
+    el.textContent = "?";
+    el.title = `문제집 총 상승 레이팅을 불러오지 못했어요 (${code})`;
+    el.style.cssText =
+      "margin-left:0.6em;font-size:0.5em;vertical-align:middle;display:inline-block;font-weight:bold;color:#a0aec0;cursor:help;";
+    heading.append(el);
+  }
+
+  async function applyWorkbookTotal(table: HTMLTableElement, handle: string): Promise<void> {
+    const heading = document.querySelector<HTMLElement>(WORKBOOK_TITLE_SELECTOR);
+    if (!heading || heading.querySelector(`.${BADGE_CLASS}`)) return;
+
+    const { counts, total } = countUnsolvedByLevel(table);
+    if (total === 0) return; // 다 풀었거나 난이도 정보가 없음
+
+    const res = await send<SetDeltasResult>({ type: "GET_SET_DELTAS", handle, sets: [counts] });
+    if (!res || !res.ok) {
+      const code = res && !res.ok ? res.code : "NO_RESPONSE";
+      console.debug("[BOJ Rating Preview]", "set-deltas failed:", code);
+      showWorkbookError(heading, code);
+      return;
+    }
+    const delta = res.data.deltas[0];
+    if (delta === undefined || heading.querySelector(`.${BADGE_CLASS}`)) return;
+
+    const rating = res.data.current.rating;
+    const before = tierLabel(rating);
+    const after = tierLabel(rating + delta);
+    const change = after !== before ? { before, after } : null;
+
+    const badge = makeBadge({ delta, color: colorForLabel(after) ?? "#718096", change }, "title");
+    badge.title =
+      `안 푼 ${total}문제를 모두 풀면 예상 레이팅 +${delta}` +
+      (change ? `, 티어 ${change.before} -> ${change.after}` : "");
+    heading.append(badge);
+  }
+
   /* ---------------- 업데이트 안내 팝업 ---------------- */
 
   const UPDATE_NOTICE_CLASS = "boj-moreinfo-update-notice";
-  const AVAILABLE_NOTICE_MS = 3000;
   const DISMISS_KEY = "updateNoticeDismissed"; // 선택적 업데이트 안내를 닫은 최신 버전
+  const AVAILABLE_NOTICE_MS = 3000; // 선택 업데이트 팝업은 이 시간 뒤 자동으로 사라짐
 
   function showUpdateNotice(h: HealthStatus, onClose: () => void): void {
     if (document.querySelector(`.${UPDATE_NOTICE_CLASS}`)) return;
@@ -682,6 +814,7 @@ type HealthResult =
 
     box.append(close);
     document.body.append(box);
+
     if (!h.updateRequired) setTimeout(() => box.remove(), AVAILABLE_NOTICE_MS);
   }
 
@@ -762,15 +895,31 @@ type HealthResult =
   }
 
   async function main(): Promise<void> {
-    const table = document.querySelector<HTMLTableElement>(TABLE_SELECTOR);
+    const table = findProblemTable();
     const titleEl = document.querySelector<HTMLElement>(PROBLEM_TITLE_SELECTOR);
-    if (!table && !titleEl) return; 
+    const isWorkbook = WORKBOOK_PATH_RE.test(location.pathname);
+    const lucky =
+      LUCKY_PATH_RE.test(location.pathname) && new URLSearchParams(location.search).has(LUCKY_PARAM);
+    console.debug("[BOJ Rating Preview]", "page", {
+      path: location.pathname,
+      table: table !== null,
+      title: titleEl !== null,
+      workbook: isWorkbook,
+      lucky,
+    });
+    if (!table && !titleEl) return;
 
     // 로그인 여부/서버 응답과 상관없이 확인 (서버가 바뀌어 아래 요청이 실패해도 안내가 떠야 함)
     void checkUpdateNotice();
 
     const handle = getHandle();
-    if (!handle) return;
+    if (!handle) {
+      console.debug("[BOJ Rating Preview]", "handle not found (로그인 필요)");
+      return;
+    }
+
+    // 문제집이면 제목 옆에 총 상승 레이팅도 표시 (표 처리와 별개로 병렬 요청)
+    if (table && isWorkbook) void applyWorkbookTotal(table, handle);
 
     const [res, cachedRes] = await Promise.all([
       send<DeltasResult>({ type: "GET_LEVEL_DELTAS", handle }),
@@ -779,14 +928,14 @@ type HealthResult =
         : Promise.resolve(undefined),
     ]);
     if (!res || !res.ok) {
-      console.debug("[BOJ Rating Preview]", res && !res.ok ? res.code : "no response");
+      console.debug("[BOJ Rating Preview]", "level-deltas failed:", res && !res.ok ? res.code : "no response");
       return;
     }
     const deltas = res.data.deltaByLevel;
     const rating = TEST_RATING_OVERRIDE ?? res.data.current.rating;
     const cached: CachedTagMap = cachedRes && cachedRes.ok ? cachedRes.data : {};
 
-    if (table) applyToTable(table, deltas, rating, cached);
+    if (table) applyToTable(table, deltas, rating, cached, lucky);
     if (titleEl) applyToProblemPage(titleEl, deltas, rating, handle);
   }
 

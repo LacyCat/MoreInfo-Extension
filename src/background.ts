@@ -1,13 +1,21 @@
-import { fetchHealth, fetchLevelDeltas, fetchTagLevelDeltas, HANDLE_RE } from "./api.js";
+import {
+  fetchHealth,
+  fetchLevelDeltas,
+  fetchSetDeltas,
+  fetchTagLevelDeltas,
+  HANDLE_RE,
+} from "./api.js";
 import type {
   GetCachedTagDeltasMessage,
   GetHealthMessage,
   GetLevelDeltasMessage,
+  GetSetDeltasMessage,
   GetTagLevelDeltasMessage,
   HealthData,
   HealthStatus,
   LevelDeltasData,
   Result,
+  SetDeltasData,
   TagCache,
   TagCacheEntry,
   TagLevelDeltasData,
@@ -206,6 +214,46 @@ function isGetHealth(m: unknown): m is GetHealthMessage {
   return typeof m === "object" && m !== null && (m as Record<string, unknown>).type === "GET_HEALTH";
 }
 
+/* ---------------- 문제집 총 상승 레이팅 (set-deltas) ---------------- */
+
+const SET_TTL_MS = 60_000; // 같은 문제집을 연달아 열어도 1분은 재사용
+const setInflight = new Map<string, Promise<Result<SetDeltasData>>>();
+
+async function getSetDeltasCached(msg: GetSetDeltasMessage): Promise<Result<SetDeltasData>> {
+  const key = `setdeltas:${msg.handle.toLowerCase()}:${JSON.stringify(msg.sets)}`;
+
+  const stored = await chrome.storage.session.get(key);
+  const entry = stored[key] as { savedAt: number; data: SetDeltasData } | undefined;
+  if (entry && Date.now() - entry.savedAt < SET_TTL_MS) return { ok: true, data: entry.data };
+
+  const pending = setInflight.get(key);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const result = await fetchSetDeltas(msg.handle, msg.sets);
+    if (result.ok) {
+      await chrome.storage.session
+        .set({ [key]: { savedAt: Date.now(), data: result.data } })
+        .catch(() => undefined);
+    }
+    return result;
+  })().finally(() => setInflight.delete(key));
+
+  setInflight.set(key, request);
+  return request;
+}
+
+function isGetSetDeltas(m: unknown): m is GetSetDeltasMessage {
+  if (typeof m !== "object" || m === null) return false;
+  const o = m as Record<string, unknown>;
+  return (
+    o.type === "GET_SET_DELTAS" &&
+    typeof o.handle === "string" &&
+    Array.isArray(o.sets) &&
+    o.sets.every((set) => Array.isArray(set) && set.every((n) => typeof n === "number"))
+  );
+}
+
 function isGetLevelDeltas(m: unknown): m is GetLevelDeltasMessage {
   if (typeof m !== "object" || m === null) return false;
   const o = m as Record<string, unknown>;
@@ -240,6 +288,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
   if (isGetHealth(message)) {
     void getHealthCached().then(sendResponse);
+    return true;
+  }
+  if (isGetSetDeltas(message)) {
+    void getSetDeltasCached(message).then(sendResponse);
     return true;
   }
   if (isGetLevelDeltas(message)) {

@@ -74,6 +74,13 @@ export interface HealthStatus {
   updateUrl: string | null;
 }
 
+/** POST /users/{handle}/set-deltas 응답 */
+export interface SetDeltasData {
+  handle?: string;
+  current: { rating: number };
+  deltas: number[]; // sets와 같은 길이, 같은 순서
+}
+
 export type ClientErrorCode =
   | "INVALID_REQUEST"
   | "USER_NOT_FOUND"
@@ -108,4 +115,10 @@ export interface GetCachedTagDeltasMessage {
 
 export interface GetHealthMessage {
   type: "GET_HEALTH";
+}
+
+export interface GetSetDeltasMessage {
+  type: "GET_SET_DELTAS";
+  handle: string;
+  sets: number[][]; // 각 set: 길이 31, 인덱스=난이도, 값=그 난이도 문제 수
 }
