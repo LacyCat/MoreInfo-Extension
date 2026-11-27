@@ -190,10 +190,29 @@ type SetDeltasResult =
     return m && m[1] !== undefined ? Number(m[1]) : null;
   }
 
+  /* ---------------- 핸들 (모든 사이트 공통) ---------------- */
+  // 요청에 쓰는 핸들은 전부 resolveHandle()을 거침: 팝업에서 입력한 값 > 사이트에서 읽은 값
+
+  const HANDLE_RE = /^[A-Za-z0-9_]{1,30}$/;
+  const isHandle = (v: string): boolean => HANDLE_RE.test(v);
+
+  // types.ts의 HANDLE_OVERRIDE_KEY와 같은 값 (classic script라 import 불가)
+  const HANDLE_OVERRIDE_KEY = "handleOverride";
+
+  async function resolveHandle(detected: string | null): Promise<string | null> {
+    try {
+      const stored = (await chrome.storage.local.get(HANDLE_OVERRIDE_KEY))[HANDLE_OVERRIDE_KEY];
+      if (typeof stored === "string" && isHandle(stored)) return stored;
+    } catch {
+      // 저장소를 못 읽으면 사이트에서 읽은 값을 씀
+    }
+    return detected;
+  }
+
   function getHandle(): string | null {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="username"]');
     const handle = meta?.content.trim() ?? "";
-    return /^[A-Za-z0-9_]{1,30}$/.test(handle) ? handle : null;
+    return isHandle(handle) ? handle : null;
   }
 
   function problemIdFromPage(): number | null {
@@ -1048,12 +1067,11 @@ type SetDeltasResult =
   }
 
   function getDojHandle(): string | null {
-    const ok = (v: string): boolean => /^[A-Za-z0-9_]{1,30}$/.test(v);
     const text = document.querySelector(DOJ_HANDLE_SELECTOR)?.textContent?.trim() ?? "";
-    if (ok(text)) return text;
+    if (isHandle(text)) return text;
     const label = document.querySelector(".header-user-trigger")?.getAttribute("aria-label") ?? "";
     const first = label.split(/\s+/)[0] ?? "";
-    return ok(first) ? first : null;
+    return isHandle(first) ? first : null;
   }
 
   // DOJ 태그 표기 -> 서버 태그 키. 공백/기호를 지우고 소문자로 맞춘 뒤 비교함
@@ -1227,7 +1245,7 @@ type SetDeltasResult =
       void checkUpdateNotice();
     }
 
-    const handle = getDojHandle();
+    const handle = await resolveHandle(getDojHandle());
     if (!handle) return; // 로그인 필요 (헤더가 아직 안 그려졌을 수도 있어서 다음 변화 때 다시 시도)
 
     const state = await getSpaState(handle);
@@ -1303,8 +1321,6 @@ type SetDeltasResult =
   const JUNGOL_HANDLE_STORAGE_KEY = "jungolHandle";
 
   let jungolHandleCache: string | null = null;
-
-  const isHandle = (v: string): boolean => /^[A-Za-z0-9_]{1,30}$/.test(v);
 
   /**
    * 프로필 메뉴(아바타 클릭)를 열었을 때만 DOM에 생기는 "@핸들"을 읽어 저장해 둠.
@@ -1392,7 +1408,7 @@ type SetDeltasResult =
       void checkUpdateNotice();
     }
 
-    const handle = await getJungolHandle();
+    const handle = await resolveHandle(await getJungolHandle());
     if (!handle) {
       console.debug("[BOJ Rating Preview]", "jungol handle not found (프로필 메뉴를 한 번 열어 주세요)");
       return;
@@ -1423,7 +1439,7 @@ type SetDeltasResult =
     // 로그인 여부/서버 응답과 상관없이 확인 (서버가 바뀌어 아래 요청이 실패해도 안내가 떠야 함)
     void checkUpdateNotice();
 
-    const handle = getHandle();
+    const handle = await resolveHandle(getHandle());
     if (!handle) {
       console.debug("[BOJ Rating Preview]", "handle not found (로그인 필요)");
       return;

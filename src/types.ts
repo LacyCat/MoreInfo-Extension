@@ -1,3 +1,9 @@
+/**
+ * 팝업에서 직접 입력한 솔브닥 아이디. 값이 있으면 모든 사이트(BOJ/DOJ/JUNGOL)의 요청이 이 아이디로 감.
+ * (content.ts는 classic script라 import를 못 해서 같은 키가 content.ts의 HANDLE_OVERRIDE_KEY에도 있음 — 바꿀 땐 같이 바꿀 것)
+ */
+export const HANDLE_OVERRIDE_KEY = "handleOverride";
+
 export interface LevelDeltasData {
   handle: string;
   current: { rating: number };

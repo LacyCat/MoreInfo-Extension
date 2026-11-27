@@ -1,11 +1,15 @@
 {
   "manifest_version": 3,
   "name": "MoreInfo - 더 많은 OJ 정보",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Solved.ac 지원 OJ 문제 페이지에 solved.ac 예상 레이팅 변화를 표시합니다.",
   "background": {
     "service_worker": "dist/background.js",
     "type": "module"
+  },
+  "action": {
+    "default_title": "MoreInfo",
+    "default_popup": "popup.html"
   },
   "permissions": ["storage"],
   "host_permissions": ["https://moreinfo.lacycat.org/*"],
