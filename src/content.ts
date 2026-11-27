@@ -79,6 +79,8 @@ type SetDeltasResult =
 
   // doj.kr 이면 DOJ 어댑터로 동작 (BOJ와 같은 배지/호버 박스/계산을 그대로 씀)
   const IS_DOJ = /(^|\.)doj\.kr$/.test(location.hostname);
+  // jungol.co.kr 이면 JUNGOL 어댑터로 동작 (태그 정보는 아직 쓰지 않음 → +N 배지만 표시)
+  const IS_JUNGOL = /(^|\.)jungol\.co\.kr$/.test(location.hostname);
 
   /* ---------------- 태그 ---------------- */
 
@@ -171,7 +173,8 @@ type SetDeltasResult =
     D: "#00B4FC",
     R: "#FF0062",
   };
-  const TIER_COLORS = IS_DOJ ? DOJ_TIER_COLORS : BOJ_TIER_COLORS;
+  // JUNGOL의 티어 색(--t: #ad5600 등)이 DOJ 팔레트와 같아서 그대로 씀
+  const TIER_COLORS = IS_DOJ || IS_JUNGOL ? DOJ_TIER_COLORS : BOJ_TIER_COLORS;
   const TIER_LETTERS = ["B", "S", "G", "P", "D", "R"] as const;
   function colorForLabel(label: string): string | null {
     return TIER_COLORS[label.charAt(0)] ?? null;
@@ -1005,8 +1008,8 @@ type SetDeltasResult =
   const DOJ_TITLE_DIFFICULTY_SELECTOR = ".problem-title-difficulty";
   const DOJ_TAG_SECTION_SELECTOR = ".problem-tags-section";
   const DOJ_TAG_TOGGLE_SELECTOR = ".problem-meta-tag-toggle";
-  const DOJ_KEY_ATTR = "data-moreinfo-key";
-  const DOJ_STATE_TTL_MS = 60_000;
+  const SPA_KEY_ATTR = "data-moreinfo-key";
+  const SPA_STATE_TTL_MS = 60_000;
 
   const DOJ_TIER_NAMES = ["bronze", "silver", "gold", "platinum", "diamond", "ruby"];
   const ROMAN_TO_NUM: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5 };
@@ -1067,6 +1070,7 @@ type SetDeltasResult =
   const DOJ_TAG_KEY_BY_NAME = new Map<string, string>(
     DOJ_TAG_ALIASES.flatMap(([key, names]) => names.map((n) => [n, key] as [string, string]))
   );
+  const DOJ_SERVER_TAG_KEYS = new Set<string>(TAG_NAME_TO_KEY.values());
   const normDojTag = (s: string): string => s.replace(/^#/, "").replace(/[\s\-_]+/g, "").toLowerCase();
 
   /** 공개된 태그에서 서버가 아는 키만 읽음. 태그가 아직 접혀 있으면 "hidden" */
@@ -1075,6 +1079,17 @@ type SetDeltasResult =
     const toggle = document.querySelector(DOJ_TAG_TOGGLE_SELECTOR);
     const keys = new Set<string>();
     if (section) {
+      // 태그 칩 링크(?tags=ds)에 서버 키가 그대로 들어 있으니 먼저 읽음 (한글 표기가 바뀌어도 동작)
+      for (const a of Array.from(section.querySelectorAll<HTMLAnchorElement>('a[href*="tags="]'))) {
+        let key: string | null = null;
+        try {
+          key = new URL(a.getAttribute("href") ?? "", location.href).searchParams.get("tags");
+        } catch {
+          key = null;
+        }
+        if (key && DOJ_SERVER_TAG_KEYS.has(key)) keys.add(key);
+      }
+      // 링크로 못 읽은 태그는 표기(한글/영문)로 보충
       for (const el of Array.from(section.querySelectorAll<HTMLElement>("*"))) {
         if (el === toggle || el.children.length > 0) continue;
         const text = el.textContent?.trim() ?? "";
@@ -1098,15 +1113,15 @@ type SetDeltasResult =
     return requestTagDeltas(handle, problemId, level, tags);
   }
 
-  interface DojState {
+  interface SpaState {
     rating: number;
     deltas: number[];
   }
-  let dojStateCache: { handle: string; at: number; value: Promise<DojState | null> } | null = null;
+  let spaStateCache: { handle: string; at: number; value: Promise<SpaState | null> } | null = null;
 
-  function getDojState(handle: string): Promise<DojState | null> {
-    if (dojStateCache && dojStateCache.handle === handle && Date.now() - dojStateCache.at < DOJ_STATE_TTL_MS) {
-      return dojStateCache.value;
+  function getSpaState(handle: string): Promise<SpaState | null> {
+    if (spaStateCache && spaStateCache.handle === handle && Date.now() - spaStateCache.at < SPA_STATE_TTL_MS) {
+      return spaStateCache.value;
     }
     const value = send<DeltasResult>({ type: "GET_LEVEL_DELTAS", handle }).then((res) => {
       if (!res || !res.ok) {
@@ -1115,7 +1130,7 @@ type SetDeltasResult =
       }
       return { rating: TEST_RATING_OVERRIDE ?? res.data.current.rating, deltas: res.data.deltaByLevel };
     });
-    dojStateCache = { handle, at: Date.now(), value };
+    spaStateCache = { handle, at: Date.now(), value };
     return value;
   }
 
@@ -1131,7 +1146,7 @@ type SetDeltasResult =
     return value;
   }
 
-  function applyToDojTable(state: DojState, cached: CachedTagMap): void {
+  function applyToDojTable(state: SpaState, cached: CachedTagMap): void {
     const table = document.querySelector<HTMLTableElement>(DOJ_LIST_TABLE_SELECTOR);
     if (!table) return;
 
@@ -1150,12 +1165,12 @@ type SetDeltasResult =
 
       // React가 행을 재사용해 내용만 바꿀 수 있으니, 문제/난이도/레이팅이 달라졌으면 배지를 다시 만듦
       const existing = cell.querySelector<HTMLElement>(`.${BADGE_CLASS}`);
-      if (existing && existing.getAttribute(DOJ_KEY_ATTR) === key) continue;
+      if (existing && existing.getAttribute(SPA_KEY_ATTR) === key) continue;
       existing?.remove();
       if (!p || key === null || id === null || level === null) continue;
 
       const badge = makeBadge(p, "list");
-      badge.setAttribute(DOJ_KEY_ATTR, key);
+      badge.setAttribute(SPA_KEY_ATTR, key);
       cell.prepend(badge);
 
       const entry = cached[String(id)];
@@ -1169,7 +1184,7 @@ type SetDeltasResult =
     }
   }
 
-  function applyToDojProblem(state: DojState, handle: string, problemId: number): void {
+  function applyToDojProblem(state: SpaState, handle: string, problemId: number): void {
     const wrap = document.querySelector<HTMLElement>(DOJ_TITLE_DIFFICULTY_SELECTOR);
     const parent = wrap?.parentElement;
     if (!wrap || !parent) return;
@@ -1182,12 +1197,12 @@ type SetDeltasResult =
     const existing = Array.from(parent.children).find(
       (c): c is HTMLElement => c instanceof HTMLElement && c.classList.contains(BADGE_CLASS)
     );
-    if (existing && existing.getAttribute(DOJ_KEY_ATTR) === key) return;
+    if (existing && existing.getAttribute(SPA_KEY_ATTR) === key) return;
     existing?.remove();
     if (!p || key === null || level === null) return;
 
     const badge = makeBadge(p, "inline");
-    badge.setAttribute(DOJ_KEY_ATTR, key);
+    badge.setAttribute(SPA_KEY_ATTR, key);
     wrap.after(badge); // 난이도 오른쪽
     attachTagBox(badge, "left", {
       initial: null,
@@ -1197,7 +1212,7 @@ type SetDeltasResult =
     });
   }
 
-  let dojNoticeChecked = false;
+  let spaNoticeChecked = false;
 
   async function scanDoj(): Promise<void> {
     sweepFloatingBoxes();
@@ -1207,15 +1222,15 @@ type SetDeltasResult =
     const m = DOJ_PROBLEM_PATH_RE.exec(path);
     if (!isList && !(m && m[1] !== undefined)) return;
 
-    if (!dojNoticeChecked) {
-      dojNoticeChecked = true;
+    if (!spaNoticeChecked) {
+      spaNoticeChecked = true;
       void checkUpdateNotice();
     }
 
     const handle = getDojHandle();
     if (!handle) return; // 로그인 필요 (헤더가 아직 안 그려졌을 수도 있어서 다음 변화 때 다시 시도)
 
-    const state = await getDojState(handle);
+    const state = await getSpaState(handle);
     if (!state || location.pathname !== path) return;
 
     if (isList) {
@@ -1227,7 +1242,8 @@ type SetDeltasResult =
     }
   }
 
-  function mainDoj(): void {
+  /** SPA 사이트(DOJ, JUNGOL)용: 화면이 바뀔 때마다 scan을 다시 돌림 */
+  function watchSpa(scan: () => Promise<void>): void {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let running = false;
     let again = false;
@@ -1239,7 +1255,7 @@ type SetDeltasResult =
       }
       running = true;
       try {
-        await scanDoj();
+        await scan();
       } catch (e) {
         console.debug("[BOJ Rating Preview]", "scan failed", e);
       } finally {
@@ -1267,6 +1283,126 @@ type SetDeltasResult =
     }).observe(document.body, { childList: true, subtree: true });
 
     schedule();
+  }
+
+  /* ---------------- JUNGOL (jungol.co.kr) ---------------- */
+  // SvelteKit SPA. 클래스에 붙는 S-xxxx 해시는 빌드마다 바뀌므로 쓰지 않고, 의미가 있는 클래스/속성만 선택자로 씀.
+  // 티어 이미지는 solved.ac와 같은 "<레벨>.svg" 형태라 BOJ와 똑같이 레벨을 읽음.
+  // 태그는 아직 지원하지 않음 → 호버 박스 없이 +N 배지만 붙임.
+
+  const JUNGOL_LIST_PATH_RE = /^\/problem\/?$/; // ?tag=... 같은 쿼리가 붙은 목록도 pathname은 같음
+  const JUNGOL_PROBLEM_PATH_RE = /^\/problem\/(\d+)\/?$/;
+
+  const JUNGOL_ROW_SELECTOR = "tr.problem-row";
+  const JUNGOL_TITLE_CELL_SELECTOR = "td[data-col-primary]";
+  const JUNGOL_ID_LINK_SELECTOR = "a.num-cell";
+  const JUNGOL_SOLVED_SELECTOR = ".pl-solve.ok"; // 맞힌 문제 표시 (aria-label="정답")
+  const JUNGOL_TIER_IMG_SELECTOR = ".tier-image img";
+  const JUNGOL_PROBLEM_HEAD_SELECTOR = ".title-main h1 .head"; // 문제 페이지 제목줄: 티어 + 이름 + 제한
+  const JUNGOL_MENU_HANDLE_SELECTOR = ".ident h2"; // 프로필 메뉴(열렸을 때)의 "@핸들"
+  const JUNGOL_HANDLE_STORAGE_KEY = "jungolHandle";
+
+  let jungolHandleCache: string | null = null;
+
+  const isHandle = (v: string): boolean => /^[A-Za-z0-9_]{1,30}$/.test(v);
+
+  /**
+   * 프로필 메뉴(아바타 클릭)를 열었을 때만 DOM에 생기는 "@핸들"을 읽어 저장해 둠.
+   * 메뉴가 닫혀 있으면 핸들이 DOM에 없으므로, 한 번 열어 본 뒤부터는 저장된 값을 씀.
+   */
+  function captureJungolHandle(): void {
+    const text = document.querySelector(JUNGOL_MENU_HANDLE_SELECTOR)?.textContent?.trim() ?? "";
+    const m = /^@([A-Za-z0-9_]{1,30})$/.exec(text);
+    const found = m && m[1] !== undefined ? m[1] : null;
+    if (found === null || found === jungolHandleCache) return;
+    jungolHandleCache = found;
+    void chrome.storage.local.set({ [JUNGOL_HANDLE_STORAGE_KEY]: found }).catch(() => undefined);
+  }
+
+  async function getJungolHandle(): Promise<string | null> {
+    if (jungolHandleCache) return jungolHandleCache;
+    try {
+      const stored = (await chrome.storage.local.get(JUNGOL_HANDLE_STORAGE_KEY))[JUNGOL_HANDLE_STORAGE_KEY];
+      if (typeof stored === "string" && isHandle(stored)) return (jungolHandleCache = stored);
+    } catch {
+      // 저장소를 못 읽으면 핸들 없음으로 처리
+    }
+    return null;
+  }
+
+  function jungolIdFromRow(row: Element): number | null {
+    const link = row.querySelector<HTMLAnchorElement>(JUNGOL_ID_LINK_SELECTOR);
+    const m = link ? /^\/problem\/(\d+)\/?$/.exec(link.pathname) : null;
+    return m && m[1] !== undefined ? Number(m[1]) : null;
+  }
+
+  function applyToJungolTable(state: SpaState): void {
+    for (const row of Array.from(document.querySelectorAll<HTMLTableRowElement>(JUNGOL_ROW_SELECTOR))) {
+      const cell = row.querySelector<HTMLElement>(JUNGOL_TITLE_CELL_SELECTOR);
+      if (!cell) continue;
+
+      const id = jungolIdFromRow(row);
+      // 이미 맞힌 문제는 표시하지 않음 (BOJ와 동일). 티어 이미지가 없으면(언레이티드) level=null
+      const solved = row.querySelector(JUNGOL_SOLVED_SELECTOR) !== null;
+      const level = solved ? null : levelFromImg(row.querySelector<HTMLImageElement>(JUNGOL_TIER_IMG_SELECTOR));
+      const p = id !== null && level !== null ? predict(level, state.deltas, state.rating) : null;
+      const key = p ? `${id}:${level}:${state.rating}` : null;
+
+      // Svelte가 행을 재사용해 내용만 바꿀 수 있으니, 문제/난이도/레이팅이 달라졌으면 배지를 다시 만듦
+      const existing = cell.querySelector<HTMLElement>(`.${BADGE_CLASS}`);
+      if (existing && existing.getAttribute(SPA_KEY_ATTR) === key) continue;
+      existing?.remove();
+      if (!p || key === null) continue;
+
+      const badge = makeBadge(p, "list");
+      badge.setAttribute(SPA_KEY_ATTR, key);
+      cell.prepend(badge);
+    }
+  }
+
+  function applyToJungolProblem(state: SpaState, problemId: number): void {
+    const head = document.querySelector<HTMLElement>(JUNGOL_PROBLEM_HEAD_SELECTOR);
+    const name = head?.querySelector<HTMLElement>(".name");
+    if (!head || !name) return;
+
+    const level = levelFromImg(head.querySelector<HTMLImageElement>(JUNGOL_TIER_IMG_SELECTOR));
+    const p = level !== null ? predict(level, state.deltas, state.rating) : null;
+    const key = p ? `${problemId}:${level}:${state.rating}` : null;
+
+    const existing = head.querySelector<HTMLElement>(`.${BADGE_CLASS}`);
+    if (existing && existing.getAttribute(SPA_KEY_ATTR) === key) return;
+    existing?.remove();
+    if (!p || key === null) return;
+
+    const badge = makeBadge(p, "inline");
+    badge.setAttribute(SPA_KEY_ATTR, key);
+    name.after(badge); // 문제 이름 오른쪽
+  }
+
+  async function scanJungol(): Promise<void> {
+    captureJungolHandle(); // 어느 페이지에서든 메뉴가 열리면 핸들을 기억함
+
+    const path = location.pathname;
+    const isList = JUNGOL_LIST_PATH_RE.test(path);
+    const m = JUNGOL_PROBLEM_PATH_RE.exec(path);
+    if (!isList && !(m && m[1] !== undefined)) return;
+
+    if (!spaNoticeChecked) {
+      spaNoticeChecked = true;
+      void checkUpdateNotice();
+    }
+
+    const handle = await getJungolHandle();
+    if (!handle) {
+      console.debug("[BOJ Rating Preview]", "jungol handle not found (프로필 메뉴를 한 번 열어 주세요)");
+      return;
+    }
+
+    const state = await getSpaState(handle);
+    if (!state || location.pathname !== path) return;
+
+    if (isList) applyToJungolTable(state);
+    else if (m && m[1] !== undefined) applyToJungolProblem(state, Number(m[1]));
   }
 
   async function main(): Promise<void> {
@@ -1314,6 +1450,7 @@ type SetDeltasResult =
     if (titleEl) applyToProblemPage(titleEl, deltas, rating, handle);
   }
 
-  if (IS_DOJ) mainDoj();
+  if (IS_DOJ) watchSpa(scanDoj);
+  else if (IS_JUNGOL) watchSpa(scanJungol);
   else void main();
 })();

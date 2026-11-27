@@ -101,7 +101,7 @@ export interface GetLevelDeltasMessage {
 }
 
 /** 확장이 지원하는 저지. 문제 번호가 저지마다 겹치므로 태그 캐시를 이걸로 분리함 (없으면 boj) */
-export type Oj = "boj" | "doj";
+export type Oj = "boj" | "doj" | "jungol";
 
 export interface GetTagLevelDeltasMessage {
   type: "GET_TAG_LEVEL_DELTAS";

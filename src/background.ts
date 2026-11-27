@@ -65,12 +65,12 @@ const tagInflight = new Map<string, Promise<Result<TagLevelDeltasData>>>();
 let tagWriteChain: Promise<unknown> = Promise.resolve();
 
 function parseOj(v: unknown): Oj {
-  return v === "doj" ? "doj" : "boj";
+  return v === "doj" || v === "jungol" ? v : "boj";
 }
 
-// 문제 번호가 BOJ/DOJ 사이에서 겹치므로 DOJ는 키를 따로 둠 (BOJ 키는 예전 그대로 → 기존 캐시 유지)
+// 문제 번호가 저지끼리 겹치므로 BOJ 외에는 키를 따로 둠 (BOJ 키는 예전 그대로 → 기존 캐시 유지)
 function tagCacheKey(handle: string, oj: Oj): string {
-  return `tagDeltaCache:${oj === "doj" ? "doj:" : ""}${handle.toLowerCase()}`;
+  return `tagDeltaCache:${oj === "boj" ? "" : `${oj}:`}${handle.toLowerCase()}`;
 }
 
 async function readTagCache(handle: string, oj: Oj): Promise<TagCache> {
